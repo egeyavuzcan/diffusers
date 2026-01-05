@@ -377,7 +377,14 @@ class FluxSpaceTransformerBlock(torch.nn.Module):
         start_idx = joint_attention_kwargs.get("start_timestep_idx", 0)
         stop_idx = joint_attention_kwargs.get("stop_timestep_idx", float('inf'))
         
-        if fluxspace_enabled and start_idx <= current_idx <= stop_idx:
+        # Also check if required parameters are present
+        has_required_params = (
+            joint_attention_kwargs.get("edit_prompt_embeds") is not None and
+            joint_attention_kwargs.get("neg_prompt_embeds") is not None and
+            joint_attention_kwargs.get("temb_edit") is not None
+        )
+        
+        if fluxspace_enabled and has_required_params and start_idx <= current_idx <= stop_idx:
             return self.forward_attention_combine(
                 hidden_states, encoder_hidden_states, temb,
                 image_rotary_emb=image_rotary_emb, 

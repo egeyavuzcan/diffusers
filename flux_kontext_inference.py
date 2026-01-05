@@ -112,11 +112,48 @@ class FluxKontextFluxSpace:
             ortho_emb = edit_clip - emb_projection
             edited_pooled = (1 - edit_global_scale) * base_clip + edit_global_scale * ortho_emb
         else:
-            edited_pooled = None
+            edited_pooled = base_clip
         
         # Setup FluxSpace parameters in joint_attention_kwargs
         if edit_stop_step is None:
             edit_stop_step = num_inference_steps
+        
+        # Pre-compute context embeddings
+        edit_context_embeds = self.pipe.transformer.context_embedder(edit_t5)
+        null_context_embeds = self.pipe.transformer.context_embedder(null_t5)
+        
+        # Guidance tensor
+        guidance = None
+        if self.pipe.transformer.config.guidance_embeds:
+            guidance = torch.full([1], guidance_scale, device=self.device, dtype=torch.float32)
+        
+        # Create callback to set FluxSpace parameters each step
+        def fluxspace_callback(pipe, step_idx, timestep, callback_kwargs):
+            # Get joint_attention_kwargs from the pipeline
+            jkwargs = pipe._joint_attention_kwargs
+            if jkwargs is None:
+                return callback_kwargs
+            
+            # Update step index
+            jkwargs["current_timestep_idx"] = step_idx
+            
+            # Compute temb_edit for this timestep
+            timestep_tensor = timestep.expand(1).to(self.dtype)
+            if guidance is not None:
+                temb_edit = pipe.transformer.time_text_embed(
+                    timestep_tensor, guidance * 1000, edited_pooled
+                )
+            else:
+                temb_edit = pipe.transformer.time_text_embed(
+                    timestep_tensor, edited_pooled
+                )
+            
+            # Set FluxSpace parameters
+            jkwargs["edit_prompt_embeds"] = edit_context_embeds.clone()
+            jkwargs["neg_prompt_embeds"] = null_context_embeds.clone()
+            jkwargs["temb_edit"] = temb_edit
+            
+            return callback_kwargs
             
         joint_attention_kwargs = {
             "fluxspace_enabled": True,
@@ -124,10 +161,9 @@ class FluxKontextFluxSpace:
             "stop_timestep_idx": edit_stop_step,
             "edit_content_scale": edit_scale,
             "attention_threshold": attention_threshold,
-            # These will be set per-step in the denoising loop
-            "edit_prompt_embeds": None,
-            "neg_prompt_embeds": None,
-            "temb_edit": None,
+            "edit_prompt_embeds": edit_context_embeds.clone(),
+            "neg_prompt_embeds": null_context_embeds.clone(),
+            "temb_edit": None,  # Will be set in callback
             "current_timestep_idx": 0,
         }
         
@@ -143,6 +179,7 @@ class FluxKontextFluxSpace:
             generator=generator,
             joint_attention_kwargs=joint_attention_kwargs,
             pooled_prompt_embeds=edited_pooled,
+            callback_on_step_end=fluxspace_callback,
             **kwargs
         )
         
