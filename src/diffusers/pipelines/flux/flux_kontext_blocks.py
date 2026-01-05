@@ -452,8 +452,13 @@ class FluxSpaceSingleTransformerBlock(torch.nn.Module):
 
         return hidden_states
 
-    def forward(self, hidden_states, temb, image_rotary_emb=None, joint_attention_kwargs=None):
+    def forward(self, hidden_states, encoder_hidden_states, temb, 
+                image_rotary_emb=None, joint_attention_kwargs=None):
         """Forward pass for single transformer block"""
+        # Concatenate text and image hidden states
+        text_seq_len = encoder_hidden_states.shape[1]
+        hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
+        
         residual = hidden_states
         norm_hidden_states, gate = self.norm(hidden_states, emb=temb)
         mlp_hidden_states = self.act_mlp(self.proj_mlp(norm_hidden_states))
@@ -471,7 +476,9 @@ class FluxSpaceSingleTransformerBlock(torch.nn.Module):
         if hidden_states.dtype == torch.float16:
             hidden_states = hidden_states.clip(-65504, 65504)
 
-        return hidden_states
+        # Split back to encoder and image hidden states
+        encoder_hidden_states, hidden_states = hidden_states[:, :text_seq_len], hidden_states[:, text_seq_len:]
+        return encoder_hidden_states, hidden_states
 
 
 # ============================================================================
