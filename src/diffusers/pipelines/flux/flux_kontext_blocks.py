@@ -64,9 +64,9 @@ class FluxSpaceTransformerBlock(torch.nn.Module):
         self.ff = orig_module.ff
         self.ff_context = orig_module.ff_context
 
-        # Other hyperparams
-        self._chunk_size = orig_module._chunk_size
-        self._chunk_dim = orig_module._chunk_dim
+        # Other hyperparams (may not exist in all versions)
+        self._chunk_size = getattr(orig_module, '_chunk_size', None)
+        self._chunk_dim = getattr(orig_module, '_chunk_dim', None)
 
     def calculate_attention_image_text(self, hidden_states, encoder_hidden_states=None, 
                                        attention_mask=None, image_rotary_emb=None):
